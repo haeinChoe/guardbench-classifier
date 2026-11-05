@@ -1,0 +1,112 @@
+name: Experiment
+description: 질문, 데이터, 비교 조건과 사전 동결 규칙으로 실험 작업을 정의합니다.
+title: "[Experiment] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        코드·도구 작업은 Engineering Task, 오류는 Bug, 실험 전 방향 결정은 Decision을 사용합니다. 각 항목은 결론부터 간결하게 씁니다.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: 질문과 기대 결과
+      description: 이 실험이 답할 질문과, 결과에 따라 무엇을 결정할지 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: data
+    attributes:
+      label: 데이터와 라벨
+      description: 데이터셋 출처·revision·해시, 라벨 출처와 상태(사람 검증 gold / provisional), 평가 전용 여부를 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: conditions
+    attributes:
+      label: 비교 조건
+      description: 모델·revision, 프롬프트, 생성 설정(cap, greedy 등), 엔진, 기준선을 조건별로 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: frozen_rules
+    attributes:
+      label: 사전 동결 규칙
+      description: 분할 방법, 모델·epoch·threshold 선택 규칙, test 평가 시점을 결과를 보기 전에 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: metrics
+    attributes:
+      label: 지표와 보고 형식
+      description: 주 지표, 클래스별 지표, invalid 처리, 슬라이스, 비용·지연 측정 조건을 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: resources
+    attributes:
+      label: 자원과 외부 의존
+      description: GPU 사용, 예상 시간, 모델 다운로드, 새 패키지, 외부 API 필요 여부를 적습니다. 없으면 "없음"으로 작성합니다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-Goals
+      description: 이 실험에서 하지 않을 튜닝, 추가 조건, 데이터 변경을 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 완료 조건과 산출물
+      description: 완료로 볼 결과와 남길 산출물(보고서, 지표 파일 등)을 체크리스트로 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: open_questions
+    attributes:
+      label: 미결정 사항과 의존 작업
+      description: 선행 Issue나 결정 대기 항목을 적습니다. 없으면 "없음"으로 작성합니다.
+    validations:
+      required: true
+
+  - type: input
+    id: branch_slug
+    attributes:
+      label: 브랜치 slug
+      description: Issue 생성 후 agent/{issue-number}-{slug} 브랜치와 전용 worktree에 사용합니다.
+      placeholder: encoder-group-cv
+    validations:
+      required: true
+
+  - type: dropdown
+    id: agent_permission
+    attributes:
+      label: 에이전트 작업 범위
+      description: 선택한 작업 범위만 허용됩니다. push와 PR 생성 선택값에도 병합 권한은 포함되지 않습니다.
+      options:
+        - 조사와 진단만 허용 — 파일 변경 금지
+        - 파일 수정과 검증까지 허용 — 커밋 금지
+        - 검증된 로컬 커밋까지 허용
+        - 검증된 로컬 커밋 및 push·PR 생성까지 허용 — 병합 금지
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: ready
+    attributes:
+      label: 실험 준비 확인
+      options:
+        - label: 정답 라벨, 원 annotation, ID, 조건 이름이 모델 입력에 들어가지 않습니다.
+          required: true
+        - label: 선택 규칙을 test 결과를 보기 전에 동결하고, test는 한 번만 평가합니다.
+          required: true

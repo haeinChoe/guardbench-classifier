@@ -1,0 +1,91 @@
+name: Engineering Task
+description: 코드 구조, 테스트, 도구, 문서 등 실험이 아닌 작업을 정의합니다.
+title: "[Task] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        실험은 Experiment, 오류는 Bug, 구현 전 방향 결정은 Decision을 사용합니다. 각 항목은 결론부터 간결하게 씁니다.
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 목적
+      description: 해결할 문제와 기대하는 저장소 상태를 적어주세요.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: task_type
+    attributes:
+      label: 작업 유형
+      options:
+        - 코드 구조
+        - 테스트
+        - 문서
+        - 빌드 또는 개발 도구
+        - 기타 유지보수
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 작업 범위
+      description: 변경을 허용하는 파일, 모듈 또는 도구를 구체적으로 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-Goals
+      description: 함께 수행하지 않을 변경이나 정리 작업을 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 완료 조건과 검증
+      description: 검증 가능한 결과와 확인할 명령·테스트를 체크리스트로 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: 실험 결과와 의존성 영향
+      description: 기존 결과 재현성, 출력 계약, 새 의존성 영향 여부를 적습니다. 없으면 "없음"으로 작성합니다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 미결정 사항과 의존 작업
+      description: 선행 Issue나 외부 의존성을 적습니다. 없으면 "없음"으로 작성합니다.
+    validations:
+      required: true
+
+  - type: input
+    id: branch_slug
+    attributes:
+      label: 브랜치 slug
+      description: Issue 생성 후 agent/{issue-number}-{slug} 브랜치와 전용 worktree에 사용합니다.
+      placeholder: split-metrics-module
+    validations:
+      required: true
+
+  - type: dropdown
+    id: agent_permission
+    attributes:
+      label: 에이전트 작업 범위
+      description: 선택한 작업 범위만 허용됩니다. push와 PR 생성 선택값에도 병합 권한은 포함되지 않습니다.
+      options:
+        - 조사와 진단만 허용 — 파일 변경 금지
+        - 파일 수정과 검증까지 허용 — 커밋 금지
+        - 검증된 로컬 커밋까지 허용
+        - 검증된 로컬 커밋 및 push·PR 생성까지 허용 — 병합 금지
+    validations:
+      required: true

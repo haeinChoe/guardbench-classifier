@@ -1,0 +1,64 @@
+name: Decision
+description: 실험·구현 전에 필요한 방향 결정과 근거를 준비합니다.
+title: "[Decision] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Decision Issue는 구현 권한을 주지 않습니다. 결정 후 별도 Experiment 또는 Task Issue로 진행합니다.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 배경과 문제
+      description: 결정이 필요한 이유와 현재 상태를 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 근거 자료
+      description: 관련 실험 결과, 지표 파일, 문서와 그 측정 조건을 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: drivers
+    attributes:
+      label: 결정 기준과 제약
+      description: 품질, 비용, 지연, 일정, 라벨 신뢰도 등 판단 기준을 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: options
+    attributes:
+      label: 선택지와 장단점
+      description: 검토한 선택지별 장단점과 영향을 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 제안과 근거
+      description: 권장안과 그 근거를 적습니다. 결정은 결정권자가 합니다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: open_questions
+    attributes:
+      label: 미결정 사항과 결정권자
+      description: 남은 질문과 결정할 사람을 적어주세요.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: decision_boundary
+    attributes:
+      label: 결정 경계 확인
+      options:
+        - label: 결정 전에는 이 내용을 확정 요구사항으로 사용하지 않고, 결정 후 별도 Issue로 추적합니다.
+          required: true
