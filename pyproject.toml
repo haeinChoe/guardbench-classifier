@@ -1,0 +1,40 @@
+[project]
+name = "guardbench-classifier"
+version = "0.1.0"
+description = "Experiments and evaluation for the GuardBench response behavior classifier"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "torch==2.9.1",
+  "transformers>=4.57,<4.58",
+  "accelerate>=1.10,<2",
+  "safetensors>=0.6,<1",
+  "huggingface_hub>=0.34,<1",
+  "httpx>=0.27,<1",
+]
+
+[project.scripts]
+guardbench-env = "guardbench_classifier.envcheck:main"
+guardbench-vllm = "guardbench_classifier.serving:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<9"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/guardbench_classifier"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: needs a running vLLM server (VLLM_BASE_URL)"]

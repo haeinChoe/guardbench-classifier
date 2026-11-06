@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Datasets, model caches, run outputs, checkpoints (never committed)
+data/
+runs/
+checkpoints/
+*.safetensors
+*.pt
+*.bin
+*.parquet
