@@ -1,0 +1,36 @@
+# Local vLLM OpenAI-compatible server for experiments.
+#   docker compose up -d vllm      # start (values come from .env)
+#   uv run --env-file .env guardbench-vllm wait
+#   docker compose down            # stop and free the GPU
+# Runs in Docker because vLLM 0.16.0 wheels need glibc >= 2.31 (the host is Rocky Linux 8, glibc 2.28).
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.16.0@sha256:4801151759655c57606c844662e5213403c032a62d149c7ce61d615759a821ef
+    container_name: guardbench-vllm
+    entrypoint: ["vllm", "serve"]
+    command:
+      - "${VLLM_MODEL:-Qwen/Qwen3-4B}"
+      - "--revision=${VLLM_MODEL_REVISION:-1cfa9a7208912126459214e8b04321603b3df60c}"
+      - "--dtype=bfloat16"
+      - "--gpu-memory-utilization=${VLLM_GPU_MEMORY_UTILIZATION:-0.65}"
+      - "--max-model-len=${VLLM_MAX_MODEL_LEN:-8192}"
+      - "--seed=0"
+      # Do not inherit sampling defaults from the model's generation_config; requests set them explicitly.
+      - "--generation-config=vllm"
+    ports:
+      - "127.0.0.1:${VLLM_PORT:-8000}:8000"
+    ipc: host
+    environment:
+      HF_TOKEN: "${HF_TOKEN:-}"
+      HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-0}"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      VLLM_NO_USAGE_STATS: "1"
+    volumes:
+      - "${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/root/.cache/huggingface"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
