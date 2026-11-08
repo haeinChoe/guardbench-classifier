@@ -20,7 +20,13 @@
 
 - 모든 작업은 Issue에서 시작한다. Issue가 없으면 먼저 Issue 작성을 요청하거나 초안을 제시한다.
 - Issue는 `.github/ISSUE_TEMPLATE/`의 Experiment, Engineering Task, Bug, Decision 중 맞는 템플릿으로 작성한다. 필수 항목과 에이전트 작업 범위를 채운다.
-- Issue 하나당 별도 worktree와 `agent/{issue-number}-{slug}` 브랜치를 사용한다. 기준 브랜치는 `dev`다.
+- Issue 하나당 별도 worktree와 `agent/{issue-number}-{slug}` 브랜치를 사용한다. 기준은 최신 `origin/dev`다.
+
+```bash
+git fetch origin
+git worktree add ../guardbench-classifier-issue-{N} -b agent/{N}-{slug} origin/dev
+```
+
 - Issue에 명시된 에이전트 작업 범위를 따른다.
 
 | 작업 범위 | 허용 |
@@ -41,6 +47,27 @@
 - 커밋 전에 `git status`와 staged diff로 Issue 범위와 변경 파일이 일치하는지 확인한다.
 - push 전에 `git log --oneline origin/dev..HEAD`, `git diff --stat origin/dev...HEAD`, 전체 diff 범위를 보고한다.
 - 검증하지 않은 결과를 완료했다고 표현하지 않는다.
+
+## 브랜치 생애주기
+
+1. Issue 작성 → worktree와 `agent/{N}-{slug}` 브랜치 생성(위 명령)
+2. 작업, 리뷰 단위 커밋, push 전 점검 후 Issue 브랜치 push
+3. `dev` 대상 PR 생성, 본문에 `Closes #N`
+4. 사람이 병합한다. 기본 방식은 merge commit이다. 병합되면 GitHub가 Issue를 닫고 원격 작업 브랜치를 자동 삭제한다(`delete_branch_on_merge`). squash·rebase로 병합하면 아래 head 포함 확인이 실패하므로, 정리하지 말고 보고한다.
+5. 병합을 확인한 뒤 로컬을 정리한다. 아래 조건을 모두 확인한 경우에만 삭제하고, 하나라도 아니면 삭제하지 않고 보고한다.
+   - PR 상태가 `MERGED`다.
+   - 작업 브랜치 head가 `origin/dev`에 포함된다.
+   - worktree에 커밋하지 않은 변경이 없다(`git status --short`가 비어 있음).
+
+```bash
+git fetch --prune origin
+git merge-base --is-ancestor agent/{N}-{slug} origin/dev   # 포함 확인 (exit 0)
+git -C ../guardbench-classifier-issue-{N} status --short    # 비어 있어야 함
+git worktree remove ../guardbench-classifier-issue-{N}      # .venv 등 무시 파일만 남았으면 --force
+git branch -d agent/{N}-{slug}
+```
+
+6. `main`은 `dev`에서 온 PR 병합으로만 갱신한다.
 
 ## 코드 구조 원칙
 
