@@ -59,13 +59,19 @@ git worktree add ../guardbench-classifier-issue-{N} -b agent/{N}-{slug} origin/d
    - 작업 브랜치 head가 `origin/dev`에 포함된다.
    - worktree에 커밋하지 않은 변경이 없다(`git status --short`가 비어 있음).
 
+정리 명령은 메인 작업 폴더(`dev`가 체크아웃된 `guardbench-classifier`)에서 순서대로 실행한다.
+
 ```bash
 git fetch --prune origin
 git merge-base --is-ancestor agent/{N}-{slug} origin/dev   # 포함 확인 (exit 0)
 git -C ../guardbench-classifier-issue-{N} status --short    # 비어 있어야 함
 git worktree remove ../guardbench-classifier-issue-{N}      # .venv 등 무시 파일만 남았으면 --force
-git branch -d agent/{N}-{slug}
+git merge --ff-only origin/dev                              # 로컬 dev를 원격에 맞춤
+git branch -d agent/{N}-{slug}                              # -D(강제 삭제)는 쓰지 않는다
 ```
+
+- `git branch -d`는 작업 브랜치가 현재 체크아웃된 로컬 `dev`나 추적하던 원격 브랜치에 합쳐졌는지 확인한다. 원격 브랜치는 병합 때 이미 지워졌으므로, 로컬 `dev`를 먼저 원격에 맞추지 않으면 병합된 브랜치도 삭제가 거부된다.
+- 로컬 `dev`는 원격 `dev`의 복사본으로만 쓴다. `--ff-only`는 로컬 `dev`가 원격보다 뒤처진 경우에만 앞으로 옮긴다. 로컬 `dev`에 원격에 없는 커밋이 있어 갈라졌으면, 병합 커밋을 만들지 않고 실패한다. 이때는 정리를 멈추고 보고한다.
 
 6. `main`은 `dev`에서 온 PR 병합으로만 갱신한다.
 
