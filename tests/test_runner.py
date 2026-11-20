@@ -14,6 +14,7 @@ from guardbench_classifier.runner import (
     run,
 )
 from guardbench_classifier.runner._files import JsonlAppender, read_jsonl
+from guardbench_classifier.runner.cli import main as cli_main
 
 
 def _git(root: Path, *args: str) -> None:
@@ -279,6 +280,24 @@ def test_allow_dirty_records_flag_and_diff(repo):
     assert json.loads((summary.run_dir / "manifest.json").read_text())["dirty"] is True
     diff = (summary.run_dir / "git.diff").read_text()
     assert "-v1" in diff and "+v2" in diff
+
+
+def test_cli_status(repo, capsys):
+    summary = run("exp", ITEMS, echo, config={}, settings=repo)
+    assert cli_main(["status", str(summary.run_dir)]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["state"] == "complete" and out["done"] == 10
+    assert out["pid_alive"] is True  # this pytest process wrote it
+
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    status = json.loads((summary.run_dir / "status.json").read_text())
+    (summary.run_dir / "status.json").write_text(json.dumps({**status, "state": "running", "pid": dead.pid}))
+    assert cli_main(["status", str(summary.run_dir)]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert (out["state"], out["pid_alive"]) == ("running", False)
+
+    assert cli_main(["status", str(summary.run_dir / "missing")]) == 1
 
 
 @pytest.mark.parametrize("bad", ["", "../x", "a/b", ".hidden"])
