@@ -107,12 +107,14 @@ def compose_env(settings: Settings, base: Mapping[str, str]) -> dict[str, str]:
     """Process environment for docker compose.
 
     Process variables take precedence over .env, so the values Python checked are the values
-    compose starts with, whether or not --env-file was used. The encoder values are passed only
-    when the encoder is configured.
+    compose starts with, whether or not --env-file was used. Every serving variable that
+    compose.yaml interpolates is passed here; the encoder ones only when it is configured.
     """
     env = dict(base)
     env.update(
         VLLM_MODEL=settings.vllm_model,
+        VLLM_MODEL_REVISION=settings.vllm_model_revision,
+        VLLM_MAX_MODEL_LEN=str(settings.vllm_max_model_len),
         VLLM_PORT=str(settings.vllm_port),
         VLLM_GPU_MEMORY_UTILIZATION=str(settings.vllm_gpu_memory_utilization),
     )
@@ -166,13 +168,16 @@ def read_gpu_memory_mib() -> tuple[int, int]:
 
 
 def check_gpu_memory(servers: Sequence[Server], margin_mib: int, total_mib: int, free_mib: int) -> None:
-    """Fail if sum(fractions) * total + margin exceeds the free memory."""
-    fractions = sum(server.memory_fraction for server in servers)
-    needed = round(fractions * total_mib + margin_mib, 3)
+    """Fail if sum(fraction * total + margin) over the servers exceeds the free memory.
+
+    The margin is per server: each vLLM process also holds memory outside its fraction (CUDA context).
+    """
+    needed = round(sum(server.memory_fraction * total_mib + margin_mib for server in servers), 3)
     if needed > free_mib:
         names = "+".join(server.name for server in servers)
+        fractions = sum(server.memory_fraction for server in servers)
         raise ServingError(f"not enough free GPU memory for {names}: need {needed:g} MiB "
-                           f"(fractions {fractions:g} x total {total_mib} MiB + margin {margin_mib} MiB), "
+                           f"(fractions {fractions:g} x total {total_mib} MiB + {len(servers)} x margin {margin_mib} MiB), "
                            f"free {free_mib} MiB")
 
 

@@ -129,10 +129,10 @@ def test_parse_gpu_memory_uses_first_gpu() -> None:
 
 def test_memory_boundary_is_inclusive() -> None:
     servers = configured_servers(Settings.from_env({"VLLM_ENCODER_CHECKPOINT_DIR": "x"}, root=Path("/r")))
-    # (0.65 + 0.10) * 16000 + 1024 = 13024
-    check_gpu_memory(servers, 1024, 16000, 13024)
-    with pytest.raises(ServingError, match="need 13024 MiB.*free 13023 MiB"):
-        check_gpu_memory(servers, 1024, 16000, 13023)
+    # (0.65 * 16000 + 1024) + (0.10 * 16000 + 1024) = 14048: the margin is counted per server
+    check_gpu_memory(servers, 1024, 16000, 14048)
+    with pytest.raises(ServingError, match="need 14048 MiB.*free 14047 MiB"):
+        check_gpu_memory(servers, 1024, 16000, 14047)
 
 
 def test_insufficient_memory_starts_nothing(tmp_path: Path) -> None:
@@ -153,7 +153,7 @@ def test_margin_is_counted(tmp_path: Path) -> None:
 
 def test_memory_only_counts_servers_to_start(tmp_path: Path) -> None:
     stack = FakeStack(healthy={QWEN_URL})
-    # Qwen already runs; only the encoder (0.10 * 16000 + 1024 = 2624) must fit.
+    # Qwen already runs; only the encoder (0.10 * 16000 + 1 margin of 1024 = 2624) must fit.
     _up(_encoder_settings(tmp_path), stack, free=2624)
     assert stack.verbs() == ["up:vllm-encoder"]
 
@@ -162,18 +162,21 @@ def test_memory_only_counts_servers_to_start(tmp_path: Path) -> None:
 
 def test_compose_gets_checked_values_over_dotenv(tmp_path: Path) -> None:
     settings = _encoder_settings(tmp_path, VLLM_GPU_MEMORY_UTILIZATION="0.5", VLLM_PORT="9001", VLLM_MODEL="m/x",
+                                 VLLM_MODEL_REVISION="rev1", VLLM_MAX_MODEL_LEN="4096",
                                  VLLM_ENCODER_PORT="9002", VLLM_ENCODER_GPU_MEMORY_UTILIZATION="0.2")
     stack = FakeStack()
     stack.urls = {"vllm": "http://127.0.0.1:9001", "vllm-encoder": "http://127.0.0.1:9002"}
     # base env carries stale values like a shell that exported .env with different numbers
     up(settings, run=stack.run, gpu_memory=stack.gpu(16000, 16000), client_for=stack.client_for,
-       base_env={"PATH": "/bin", "VLLM_GPU_MEMORY_UTILIZATION": "0.9", "VLLM_ENCODER_PORT": "1"},
+       base_env={"PATH": "/bin", "VLLM_GPU_MEMORY_UTILIZATION": "0.9", "VLLM_ENCODER_PORT": "1",
+                 "VLLM_MODEL_REVISION": "stale", "VLLM_MAX_MODEL_LEN": "1"},
        timeout=0, interval=0)
     assert len(stack.calls) == 2
     assert [c for c, _ in stack.calls][0][:3] == ["docker", "compose", "--project-directory"]
     for cmd, env in stack.calls:
         assert env["VLLM_GPU_MEMORY_UTILIZATION"] == "0.5"
         assert env["VLLM_PORT"] == "9001" and env["VLLM_MODEL"] == "m/x"
+        assert env["VLLM_MODEL_REVISION"] == "rev1" and env["VLLM_MAX_MODEL_LEN"] == "4096"
         assert env["VLLM_ENCODER_PORT"] == "9002" and env["VLLM_ENCODER_GPU_MEMORY_UTILIZATION"] == "0.2"
         assert env["VLLM_ENCODER_CHECKPOINT_DIR"] == str(tmp_path / "ckpt")
         assert env["PATH"] == "/bin"
@@ -183,7 +186,20 @@ def test_compose_gets_checked_values_over_dotenv(tmp_path: Path) -> None:
 
 def test_qwen_defaults_unchanged_in_compose_env(tmp_path: Path) -> None:
     env = compose_env(_settings(tmp_path), {})
-    assert env == {"VLLM_MODEL": "Qwen/Qwen3-4B", "VLLM_PORT": "8000", "VLLM_GPU_MEMORY_UTILIZATION": "0.65"}
+    assert env == {"VLLM_MODEL": "Qwen/Qwen3-4B", "VLLM_MODEL_REVISION": "1cfa9a7208912126459214e8b04321603b3df60c",
+                   "VLLM_MAX_MODEL_LEN": "8192", "VLLM_PORT": "8000", "VLLM_GPU_MEMORY_UTILIZATION": "0.65"}
+
+
+# Variables compose.yaml interpolates that are not serving parameters (credentials, cache, host paths).
+NON_SERVING_COMPOSE_VARS = {"HF_TOKEN", "HF_HUB_OFFLINE", "HF_CACHE_DIR", "HOME"}
+
+
+def test_every_serving_compose_variable_is_passed_by_python(tmp_path: Path) -> None:
+    import re
+    compose = Path(__file__).resolve().parents[1] / "compose.yaml"
+    used = set(re.findall(r"\$\{([A-Z_]+)[:}-]", compose.read_text()))
+    passed = set(compose_env(_encoder_settings(tmp_path), {}))
+    assert used - NON_SERVING_COMPOSE_VARS == passed
 
 
 # --- encoder selection ---

@@ -40,6 +40,8 @@ def test_missing_token_fails_fast(tmp_path: Path) -> None:
 def test_vllm_defaults_keep_qwen_values(tmp_path: Path) -> None:
     settings = Settings.from_env({}, root=tmp_path)
     assert settings.vllm_model == "Qwen/Qwen3-4B"
+    assert settings.vllm_model_revision == "1cfa9a7208912126459214e8b04321603b3df60c"
+    assert settings.vllm_max_model_len == 8192
     assert settings.vllm_port == 8000
     assert settings.vllm_gpu_memory_utilization == 0.65
     assert settings.vllm_encoder_checkpoint_dir is None
@@ -55,7 +57,7 @@ def test_encoder_settings_from_env(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("name,value", [("VLLM_GPU_MEMORY_UTILIZATION", "1.5"), ("VLLM_GPU_MEMORY_UTILIZATION", "abc"),
-                                        ("VLLM_ENCODER_GPU_MEMORY_UTILIZATION", "0"), ("VLLM_PORT", "x"),
+                                        ("VLLM_ENCODER_GPU_MEMORY_UTILIZATION", "0"), ("VLLM_PORT", "x"), ("VLLM_MAX_MODEL_LEN", "0"),
                                         ("VLLM_ENCODER_PORT", "70000"), ("VLLM_GPU_MEMORY_MARGIN_MIB", "-1")])
 def test_invalid_vllm_numbers_fail_fast(tmp_path: Path, name: str, value: str) -> None:
     with pytest.raises(ValueError, match=name):

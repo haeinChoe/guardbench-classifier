@@ -24,8 +24,8 @@ uv run --env-file .env pytest -m integration # 실제 서버로 greedy 반복 �
 uv run --env-file .env guardbench-vllm down  # 중지, GPU 반환
 ```
 
-- `up`은 `sum(메모리 비율) × GPU 전체 메모리 + VLLM_GPU_MEMORY_MARGIN_MIB`가 `nvidia-smi`의 여유 메모리보다 크면 아무것도 띄우지 않고 실패합니다. 이미 healthy한 서버는 다시 띄우지 않고, 한쪽이 실패하면 이번 `up`이 띄운 서비스를 내립니다. 실패하면 종료 코드가 0이 아닙니다. 서버별 대기 시간은 `--timeout`(기본 600초)입니다.
-- `up`이 확인한 포트·모델·메모리 비율은 `docker compose`에 프로세스 환경변수로 넘어가 `.env`보다 우선합니다. 확인한 값과 실제 기동 값은 항상 같습니다. `--env-file .env` 없이 실행하면 `.env`는 Python에 읽히지 않으므로 기본값(Qwen 0.65, 포트 8000)이 쓰입니다.
+- `up`은 `Σ(서버별 메모리 비율 × GPU 전체 메모리 + VLLM_GPU_MEMORY_MARGIN_MIB)`(여유분은 서버마다, CUDA 컨텍스트 몫)가 `nvidia-smi`의 여유 메모리보다 크면 아무것도 띄우지 않고 실패합니다. 이미 healthy한 서버는 다시 띄우지 않고, 한쪽이 실패하면 이번 `up`이 띄운 서비스를 내립니다. 실패하면 종료 코드가 0이 아닙니다. 서버별 대기 시간은 `--timeout`(기본 600초)입니다.
+- `up`이 확인한 포트·모델·revision·max-model-len·메모리 비율은 `docker compose`에 프로세스 환경변수로 넘어가 `.env`보다 우선합니다. 확인한 값과 실제 기동 값은 항상 같습니다. `--env-file .env` 없이 실행하면 `.env`는 Python에 읽히지 않으므로 기본값(Qwen 0.65, 포트 8000)이 쓰입니다.
 - `status`와 `wait`는 Qwen과 encoder를 모두 다룹니다. encoder가 설정되지 않으면 `encoder: not configured`로 표시합니다.
 - GPU는 다른 작업과 공유합니다. 메모리 확인은 첫 번째 GPU 기준입니다.
 - 모델은 호스트의 Hugging Face 캐시를 마운트해 재사용합니다.

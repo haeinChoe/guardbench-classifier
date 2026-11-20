@@ -61,6 +61,17 @@ def _mib(env: Mapping[str, str], name: str, default: int) -> int:
     return value
 
 
+def _positive_int(env: Mapping[str, str], name: str, default: int) -> int:
+    raw = (env.get(name) or "").strip()
+    try:
+        value = int(raw) if raw else default
+    except ValueError:
+        raise ValueError(f"{name} must be a positive integer, got {raw!r}") from None
+    if value <= 0:
+        raise ValueError(f"{name} must be > 0, got {value}")
+    return value
+
+
 def _path(value: str | None, default: str, root: Path) -> Path:
     raw = (value or "").strip() or default
     path = Path(raw).expanduser()
@@ -78,6 +89,8 @@ class Settings:
     cuda_visible_devices: str | None
     vllm_base_url: str
     vllm_model: str
+    vllm_model_revision: str
+    vllm_max_model_len: int
     vllm_port: int
     vllm_gpu_memory_utilization: float
     vllm_gpu_memory_margin_mib: int
@@ -102,6 +115,8 @@ class Settings:
             cuda_visible_devices=(env.get("CUDA_VISIBLE_DEVICES") or "").strip() or None,
             vllm_base_url=(env.get("VLLM_BASE_URL") or "").strip() or f"http://127.0.0.1:{vllm_port}",
             vllm_model=(env.get("VLLM_MODEL") or "").strip() or "Qwen/Qwen3-4B",
+            vllm_model_revision=(env.get("VLLM_MODEL_REVISION") or "").strip() or "1cfa9a7208912126459214e8b04321603b3df60c",
+            vllm_max_model_len=_positive_int(env, "VLLM_MAX_MODEL_LEN", 8192),
             vllm_port=vllm_port,
             vllm_gpu_memory_utilization=_ratio(env, "VLLM_GPU_MEMORY_UTILIZATION", 0.65),
             vllm_gpu_memory_margin_mib=_mib(env, "VLLM_GPU_MEMORY_MARGIN_MIB", 1024),
@@ -128,6 +143,8 @@ class Settings:
             "cuda_visible_devices": self.cuda_visible_devices,
             "vllm_base_url": self.vllm_base_url,
             "vllm_model": self.vllm_model,
+            "vllm_model_revision": self.vllm_model_revision,
+            "vllm_max_model_len": self.vllm_max_model_len,
             "vllm_gpu_memory_utilization": self.vllm_gpu_memory_utilization,
             "vllm_encoder_checkpoint_dir": str(self.vllm_encoder_checkpoint_dir) if self.vllm_encoder_checkpoint_dir else None,
             "vllm_encoder_gpu_memory_utilization": self.vllm_encoder_gpu_memory_utilization,
