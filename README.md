@@ -18,19 +18,25 @@ uv run pytest
 vLLM 0.16.0은 Docker 공식 이미지로 실행합니다. 호스트(Rocky Linux 8, glibc 2.28)에는 vLLM 휠이 설치되지 않기 때문입니다. 필요: Docker와 NVIDIA container runtime.
 
 ```bash
-docker compose up -d vllm                    # .env의 VLLM_* 값으로 시작
-uv run --env-file .env guardbench-vllm wait  # 준비될 때까지 대기
+uv run --env-file .env guardbench-vllm up    # GPU 여유 메모리 확인 → 기동 → health 대기 → status
 uv run --env-file .env guardbench-vllm status
 uv run --env-file .env pytest -m integration # 실제 서버로 greedy 반복 일치 확인
-docker compose down                          # 중지, GPU 반환
+uv run --env-file .env guardbench-vllm down  # 중지, GPU 반환
 ```
 
-- GPU는 다른 작업과 공유합니다. `VLLM_GPU_MEMORY_UTILIZATION`은 남은 GPU 메모리보다 작게 둡니다.
+- `up`은 `Σ(서버별 메모리 비율 × GPU 전체 메모리 + VLLM_GPU_MEMORY_MARGIN_MIB)`(여유분은 서버마다, CUDA 컨텍스트 몫)가 `nvidia-smi`의 여유 메모리보다 크면 아무것도 띄우지 않고 실패합니다. 이미 healthy한 서버는 다시 띄우지 않고, 한쪽이 실패하면 이번 `up`이 띄운 서비스를 내립니다. 실패하면 종료 코드가 0이 아닙니다. 서버별 대기 시간은 `--timeout`(기본 600초)입니다.
+- `up`이 확인한 포트·모델·revision·max-model-len·메모리 비율은 `docker compose`에 프로세스 환경변수로 넘어가 `.env`보다 우선합니다. 확인한 값과 실제 기동 값은 항상 같습니다. `--env-file .env` 없이 실행하면 `.env`는 Python에 읽히지 않으므로 기본값(Qwen 0.65, 포트 8000)이 쓰입니다.
+- `status`와 `wait`는 Qwen과 encoder를 모두 다룹니다. encoder가 설정되지 않으면 `encoder: not configured`로 표시합니다.
+- GPU는 다른 작업과 공유합니다. 메모리 확인은 첫 번째 GPU 기준입니다.
 - 모델은 호스트의 Hugging Face 캐시를 마운트해 재사용합니다.
 
 - 환경변수는 `.env`에만 두고 커밋하지 않습니다. 변수 목록과 설명은 `.env.example`에 있습니다.
 - 코드에서는 `guardbench_classifier.config.Settings`로만 환경변수를 읽습니다.
 - 데이터셋, 모델, 실행 결과, 체크포인트는 커밋하지 않습니다.
+
+#### encoder 서버 (선택)
+
+`.env`의 `VLLM_ENCODER_CHECKPOINT_DIR`에 체크포인트 디렉터리를 지정하면 `up`이 Qwen 다음에 encoder(`vllm-encoder`, compose profile `encoder`)도 띄웁니다. 디렉터리는 컨테이너에 읽기 전용으로 마운트되고 다운로드는 하지 않습니다. 비워 두면 Qwen만 띄웁니다. 경로가 설정됐는데 디렉터리가 없으면 아무것도 띄우지 않고 실패합니다. 포트와 메모리 비율은 `VLLM_ENCODER_PORT`, `VLLM_ENCODER_GPU_MEMORY_UTILIZATION`입니다. 서비스 정의는 `docker compose --profile encoder config`로 확인합니다.
 
 ## 실험 실행 (runner)
 

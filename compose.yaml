@@ -1,7 +1,13 @@
+# Fixed project name: container_name is fixed too, so `up`/`down` from any worktree must address
+# the same project.
+name: guardbench-classifier
+
 # Local vLLM OpenAI-compatible server for experiments.
-#   docker compose up -d vllm      # start (values come from .env)
-#   uv run --env-file .env guardbench-vllm wait
-#   docker compose down            # stop and free the GPU
+#   uv run --env-file .env guardbench-vllm up     # check free GPU memory, start, wait for health
+#   uv run --env-file .env guardbench-vllm down   # stop and free the GPU
+# `guardbench-vllm` passes the values it checked to docker compose as process environment variables
+# (they take precedence over .env). The encoder service is in the `encoder` profile and is started
+# only when VLLM_ENCODER_CHECKPOINT_DIR is set.
 # Runs in Docker because vLLM 0.16.0 wheels need glibc >= 2.31 (the host is Rocky Linux 8, glibc 2.28).
 services:
   vllm:
@@ -27,6 +33,35 @@ services:
       VLLM_NO_USAGE_STATS: "1"
     volumes:
       - "${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/root/.cache/huggingface"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Optional classification encoder. Serves a local checkpoint directory (mounted read-only);
+  # no checkpoint path is fixed here. Same image as vllm.
+  vllm-encoder:
+    profiles: ["encoder"]
+    image: vllm/vllm-openai:v0.16.0@sha256:4801151759655c57606c844662e5213403c032a62d149c7ce61d615759a821ef
+    container_name: guardbench-vllm-encoder
+    entrypoint: ["vllm", "serve"]
+    command:
+      - "/models/encoder"
+      - "--gpu-memory-utilization=${VLLM_ENCODER_GPU_MEMORY_UTILIZATION:-0.10}"
+      - "--seed=0"
+    ports:
+      - "127.0.0.1:${VLLM_ENCODER_PORT:-8001}:8000"
+    ipc: host
+    environment:
+      # The checkpoint is local; never download anything for this service.
+      HF_HUB_OFFLINE: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      VLLM_NO_USAGE_STATS: "1"
+    volumes:
+      - "${VLLM_ENCODER_CHECKPOINT_DIR:-./checkpoints/encoder-not-configured}:/models/encoder:ro"
     deploy:
       resources:
         reservations:
