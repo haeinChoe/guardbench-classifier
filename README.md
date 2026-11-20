@@ -50,8 +50,9 @@ summary = run("exp-001", items, process, config={"prompt": "v1", "gpu_shared": T
 | `errors.jsonl` | 처리 함수가 예외를 낸 행. 완료로 보지 않고 재개 때 다시 시도 |
 | `status.json` | state(running/complete/failed), total, done, error_rows, pid, 시각 |
 | `git.diff` | `allow_dirty=True`로 dirty 트리에서 시작했을 때의 `git diff HEAD` |
+| `git.status` | 같은 경우의 `git status --porcelain`. untracked 파일 목록(내용은 저장하지 않음) |
 
-- 같은 `run_id`로 다시 호출하면 빠진 행만 처리합니다. config, 동시성, 입력이 달라지면 실패하므로 새 `run_id`를 씁니다.
+- 같은 `run_id`로 다시 호출하면 빠진 행만 처리합니다. config, 동시성, 입력, 코드 상태(commit, dirty diff)가 달라지면 실패하므로 새 `run_id`를 씁니다.
 - 커밋하지 않은 변경이 있으면 거부합니다(`.gitignore` 대상 제외). 의도한 경우만 `allow_dirty=True`를 씁니다.
 - 처리 함수가 돌려준 invalid(파싱 실패 등)는 그대로 기록하고, 예외만 `errors.jsonl`로 갑니다.
 - 장시간 작업은 분리된 프로세스로 실행하고, 진행은 LLM 없이 상태 파일로 확인합니다.
