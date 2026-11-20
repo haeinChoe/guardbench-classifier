@@ -1,3 +1,7 @@
+# Fixed project name: container_name is fixed too, so `up`/`down` from any worktree must address
+# the same project.
+name: guardbench-classifier
+
 # Local vLLM OpenAI-compatible server for experiments.
 #   uv run --env-file .env guardbench-vllm up     # check free GPU memory, start, wait for health
 #   uv run --env-file .env guardbench-vllm down   # stop and free the GPU
