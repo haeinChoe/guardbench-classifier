@@ -30,6 +30,14 @@ class ManifestMismatchError(RunnerError):
 class GitState:
     commit: str
     dirty: bool
+    status: bytes  # `git status --porcelain`; lists untracked files too, which `diff` does not show
+    diff: bytes  # `git diff HEAD` if dirty, else empty
+
+    def sha256(self) -> tuple[str | None, str | None]:
+        """(diff hash, status hash); both None for a clean tree."""
+        if not self.dirty:
+            return None, None
+        return hashlib.sha256(self.diff).hexdigest(), hashlib.sha256(self.status).hexdigest()
 
 
 def now_utc() -> str:
@@ -48,8 +56,9 @@ def _git(root: Path, *args: str) -> bytes:
 def git_state(root: Path) -> GitState:
     """Current commit and whether the tree has uncommitted changes (ignored files do not count)."""
     commit = _git(root, "rev-parse", "HEAD").decode().strip()
-    dirty = bool(_git(root, "status", "--porcelain").strip())
-    return GitState(commit=commit, dirty=dirty)
+    status = _git(root, "status", "--porcelain")
+    dirty = bool(status.strip())
+    return GitState(commit=commit, dirty=dirty, status=status, diff=_git(root, "diff", "HEAD") if dirty else b"")
 
 
 def input_hash(items: list[tuple[str, object]]) -> str:
@@ -80,12 +89,26 @@ def prepare(
     concurrency: int,
     digest: str,
 ) -> dict:
-    """Write the manifest on the first run, or verify the existing one on resume. Returns it."""
+    """Write the manifest on the first run, or verify the existing one on resume. Returns it.
+
+    Resuming requires the same config, concurrency and input, and the same code state
+    (commit, dirty flag and, if dirty, the saved diff and status), so every record of a
+    run comes from the conditions the manifest describes.
+    """
     path = run_dir / "manifest.json"
     config = normalize(config)
+    diff_sha, status_sha = git.sha256()
     if path.exists():
         existing = json.loads(path.read_text(encoding="utf-8"))
-        expected = {"config": config, "concurrency": concurrency, "input_hash": digest}
+        expected = {
+            "config": config,
+            "concurrency": concurrency,
+            "input_hash": digest,
+            "git_commit": git.commit,
+            "dirty": git.dirty,
+            "git_diff_sha256": diff_sha,
+            "git_status_sha256": status_sha,
+        }
         diffs = [k for k, v in expected.items() if existing.get(k) != v]
         if diffs:
             raise ManifestMismatchError(
@@ -94,13 +117,16 @@ def prepare(
         return existing
     if (run_dir / "records.jsonl").exists() or (run_dir / "errors.jsonl").exists():
         raise RunnerError(f"{run_dir} has records but no manifest.json; cannot verify the run, refusing to resume")
-    if git.dirty:  # saved before the manifest, so a manifest with dirty=true always has its diff
-        atomic_write_bytes(run_dir / "git.diff", _git(settings.repo_root, "diff", "HEAD"))
+    if git.dirty:  # saved before the manifest, so a manifest with dirty=true always has them
+        atomic_write_bytes(run_dir / "git.diff", git.diff)
+        atomic_write_bytes(run_dir / "git.status", git.status)
     manifest = {
         "run_id": run_id,
         "created_at": now_utc(),
         "git_commit": git.commit,
         "dirty": git.dirty,
+        "git_diff_sha256": diff_sha,
+        "git_status_sha256": status_sha,
         "settings": settings.public_snapshot(),
         "versions": {
             "python": platform.python_version(),

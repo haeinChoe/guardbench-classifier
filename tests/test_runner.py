@@ -280,6 +280,80 @@ def test_allow_dirty_records_flag_and_diff(repo):
     assert json.loads((summary.run_dir / "manifest.json").read_text())["dirty"] is True
     diff = (summary.run_dir / "git.diff").read_text()
     assert "-v1" in diff and "+v2" in diff
+    assert (summary.run_dir / "git.status").read_text() == " M tracked.txt\n"
+    m = json.loads((summary.run_dir / "manifest.json").read_text())
+    assert m["git_diff_sha256"] and m["git_status_sha256"]
+
+
+def test_allow_dirty_records_untracked_file_names(repo):
+    (repo.repo_root / "new_experiment.py").write_text("print('x')\n")
+    summary = run("exp", ITEMS, echo, config={}, allow_dirty=True, settings=repo)
+    assert (summary.run_dir / "git.diff").read_text() == ""  # diff HEAD does not show untracked files
+    assert (summary.run_dir / "git.status").read_text() == "?? new_experiment.py\n"
+
+
+def test_clean_run_has_no_git_hashes_or_status_file(repo):
+    summary = run("exp", ITEMS, echo, config={}, settings=repo)
+    m = json.loads((summary.run_dir / "manifest.json").read_text())
+    assert m["git_diff_sha256"] is None and m["git_status_sha256"] is None
+    assert not (summary.run_dir / "git.status").exists()
+
+
+def _abort_after(n):
+    seen = []
+
+    def process(row_id, payload):
+        if len(seen) == n:
+            raise Abort
+        seen.append(row_id)
+        return echo(row_id, payload)
+
+    return process
+
+
+def test_resume_after_new_commit_fails(repo):
+    with pytest.raises(Abort):
+        run("exp", ITEMS, _abort_after(3), config={}, settings=repo)
+    (repo.repo_root / "tracked.txt").write_text("v2\n")
+    _git(repo.repo_root, "commit", "-q", "-am", "code change")
+    with pytest.raises(ManifestMismatchError, match="git_commit"):
+        run("exp", ITEMS, echo, config={}, settings=repo)
+    assert record_ids(repo.runs_dir / "exp") == ["r0", "r1", "r2"]  # nothing was processed
+
+
+def test_resume_dirty_run_requires_same_dirty_state(repo):
+    tracked = repo.repo_root / "tracked.txt"
+    tracked.write_text("v2\n")
+    with pytest.raises(Abort):
+        run("exp", ITEMS, _abort_after(3), config={}, allow_dirty=True, settings=repo)
+
+    tracked.write_text("v3\n")  # different uncommitted content
+    with pytest.raises(ManifestMismatchError, match="git_diff_sha256"):
+        run("exp", ITEMS, echo, config={}, allow_dirty=True, settings=repo)
+
+    tracked.write_text("v2\n")
+    (repo.repo_root / "extra.py").write_text("x\n")  # a new untracked file
+    with pytest.raises(ManifestMismatchError, match="git_status_sha256"):
+        run("exp", ITEMS, echo, config={}, allow_dirty=True, settings=repo)
+
+    (repo.repo_root / "extra.py").unlink()  # same state as the first run
+    assert run("exp", ITEMS, echo, config={}, allow_dirty=True, settings=repo).state == "complete"
+    assert sorted(record_ids(repo.runs_dir / "exp")) == sorted(i for i, _ in ITEMS)
+
+
+def test_resume_dirty_run_on_clean_tree_fails(repo):
+    (repo.repo_root / "tracked.txt").write_text("v2\n")
+    with pytest.raises(Abort):
+        run("exp", ITEMS, _abort_after(3), config={}, allow_dirty=True, settings=repo)
+    _git(repo.repo_root, "checkout", "--", "tracked.txt")
+    with pytest.raises(ManifestMismatchError, match="dirty"):
+        run("exp", ITEMS, echo, config={}, settings=repo)
+
+
+def test_resume_same_clean_state_succeeds(repo):
+    with pytest.raises(Abort):
+        run("exp", ITEMS, _abort_after(3), config={}, settings=repo)
+    assert run("exp", ITEMS, echo, config={}, settings=repo).state == "complete"
 
 
 def test_cli_status(repo, capsys):

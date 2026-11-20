@@ -6,6 +6,7 @@ in the caller. Layout of ``<runs_dir>/<run_id>/``:
     worker.lock     flock held while a run is active
     manifest.json   conditions of the first run (checked on resume)
     git.diff        ``git diff HEAD``, only when started with allow_dirty on a dirty tree
+    git.status      ``git status --porcelain`` (lists untracked files), same condition
     records.jsonl   one ``{"id", "result"}`` line per completed row (append-only)
     errors.jsonl    one line per technical failure (exception); these rows are retried on resume
     status.json     progress, replaced atomically
@@ -75,8 +76,8 @@ def run(
     abort the run after marking it failed.
 
     ``config`` is the experiment's settings, including measurement conditions; it is stored in
-    the manifest. Resuming with a different config, concurrency or input fails.
-    ``allow_dirty`` permits running with uncommitted changes (saved as ``git.diff``).
+    the manifest. Resuming with a different config, concurrency, input or code state (commit, dirty diff) fails.
+    ``allow_dirty`` permits running with uncommitted changes (saved as ``git.diff`` and ``git.status``).
     """
     if not _RUN_ID.fullmatch(run_id):
         raise ValueError(f"run_id must match {_RUN_ID.pattern}: {run_id!r}")
