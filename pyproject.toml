@@ -16,6 +16,7 @@ dependencies = [
 [project.scripts]
 guardbench-env = "guardbench_classifier.envcheck:main"
 guardbench-vllm = "guardbench_classifier.serving:main"
+guardbench-run = "guardbench_classifier.runner.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8,<9"]
