@@ -45,6 +45,7 @@ def test_vllm_defaults_keep_qwen_values(tmp_path: Path) -> None:
     assert settings.vllm_port == 8000
     assert settings.vllm_gpu_memory_utilization == 0.65
     assert settings.vllm_encoder_checkpoint_dir is None
+    assert settings.vllm_encoder_dtype == "float32"
 
 
 def test_encoder_settings_from_env(tmp_path: Path) -> None:
@@ -62,3 +63,16 @@ def test_encoder_settings_from_env(tmp_path: Path) -> None:
 def test_invalid_vllm_numbers_fail_fast(tmp_path: Path, name: str, value: str) -> None:
     with pytest.raises(ValueError, match=name):
         Settings.from_env({name: value}, root=tmp_path)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "bfloat16", "float16"])
+def test_encoder_dtype_accepts_supported_values(tmp_path: Path, dtype: str) -> None:
+    settings = Settings.from_env({"VLLM_ENCODER_DTYPE": dtype}, root=tmp_path)
+    assert settings.vllm_encoder_dtype == dtype
+    assert settings.public_snapshot()["vllm_encoder_dtype"] == dtype
+
+
+@pytest.mark.parametrize("value", ["fp32", "auto", "half", "FLOAT32"])
+def test_encoder_dtype_rejects_other_values(tmp_path: Path, value: str) -> None:
+    with pytest.raises(ValueError, match="VLLM_ENCODER_DTYPE"):
+        Settings.from_env({"VLLM_ENCODER_DTYPE": value}, root=tmp_path)

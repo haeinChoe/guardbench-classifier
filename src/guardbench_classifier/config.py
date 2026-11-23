@@ -72,6 +72,16 @@ def _positive_int(env: Mapping[str, str], name: str, default: int) -> int:
     return value
 
 
+ENCODER_DTYPES = ("float32", "bfloat16", "float16")
+
+
+def _choice(env: Mapping[str, str], name: str, default: str, choices: tuple[str, ...]) -> str:
+    value = (env.get(name) or "").strip() or default
+    if value not in choices:
+        raise ValueError(f"{name} must be one of {', '.join(choices)}, got {value!r}")
+    return value
+
+
 def _path(value: str | None, default: str, root: Path) -> Path:
     raw = (value or "").strip() or default
     path = Path(raw).expanduser()
@@ -97,6 +107,7 @@ class Settings:
     vllm_encoder_checkpoint_dir: Path | None  # None = encoder not configured
     vllm_encoder_port: int
     vllm_encoder_gpu_memory_utilization: float
+    vllm_encoder_dtype: str
     _hf_token: str | None
 
     @classmethod
@@ -123,6 +134,7 @@ class Settings:
             vllm_encoder_checkpoint_dir=_path(encoder_dir, "", root) if encoder_dir else None,
             vllm_encoder_port=_port(env, "VLLM_ENCODER_PORT", 8001),
             vllm_encoder_gpu_memory_utilization=_ratio(env, "VLLM_ENCODER_GPU_MEMORY_UTILIZATION", 0.10),
+            vllm_encoder_dtype=_choice(env, "VLLM_ENCODER_DTYPE", "float32", ENCODER_DTYPES),
             _hf_token=(env.get("HF_TOKEN") or "").strip() or None,
         )
 
@@ -148,6 +160,7 @@ class Settings:
             "vllm_gpu_memory_utilization": self.vllm_gpu_memory_utilization,
             "vllm_encoder_checkpoint_dir": str(self.vllm_encoder_checkpoint_dir) if self.vllm_encoder_checkpoint_dir else None,
             "vllm_encoder_gpu_memory_utilization": self.vllm_encoder_gpu_memory_utilization,
+            "vllm_encoder_dtype": self.vllm_encoder_dtype,
             "hf_token_present": self._hf_token is not None,
         }
 

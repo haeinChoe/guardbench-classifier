@@ -3,11 +3,12 @@
 name: guardbench-classifier
 
 # Local vLLM OpenAI-compatible server for experiments.
-#   uv run --env-file .env guardbench-vllm up     # check free GPU memory, start, wait for health
-#   uv run --env-file .env guardbench-vllm down   # stop and free the GPU
+#   uv run --env-file .env guardbench-vllm up [qwen|encoder]   # one server: check free GPU memory, start, wait
+#   uv run --env-file .env guardbench-vllm down                # stop everything and free the GPU
 # `guardbench-vllm` passes the values it checked to docker compose as process environment variables
-# (they take precedence over .env). The encoder service is in the `encoder` profile and is started
-# only when VLLM_ENCODER_CHECKPOINT_DIR is set.
+# (they take precedence over .env). The encoder service is in the `encoder` profile and needs
+# VLLM_ENCODER_CHECKPOINT_DIR. Servers are started one at a time: Qwen and the encoder together do
+# not fit in the GPU memory left by other jobs.
 # Runs in Docker because vLLM 0.16.0 wheels need glibc >= 2.31 (the host is Rocky Linux 8, glibc 2.28).
 services:
   vllm:
@@ -50,6 +51,8 @@ services:
     entrypoint: ["vllm", "serve"]
     command:
       - "/models/encoder"
+      # Pinned: vLLM would otherwise pick fp16, and predictions differ between precisions.
+      - "--dtype=${VLLM_ENCODER_DTYPE:-float32}"
       - "--gpu-memory-utilization=${VLLM_ENCODER_GPU_MEMORY_UTILIZATION:-0.10}"
       - "--seed=0"
     ports:
