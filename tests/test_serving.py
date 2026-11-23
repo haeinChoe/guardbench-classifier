@@ -66,19 +66,19 @@ class FakeStack:
 
     def __init__(self, healthy: set[str] | None = None, fail_services: set[str] = frozenset(),
                  never_healthy: set[str] = frozenset(), exit_services: set[str] = frozenset(),
-                 fail_rm: bool = False, logs_available: bool = True) -> None:
+                 fail_rm: bool = False, logs_available: bool = True, leave_container: bool = False) -> None:
         self.healthy = set(healthy or ())
         self.fail_services = set(fail_services)
         self.never_healthy = set(never_healthy)  # starts and keeps running, but never gets healthy
         self.exit_services = set(exit_services)  # starts, then the container exits (never healthy)
         self.fail_rm = fail_rm
         self.logs_available = logs_available
+        self.leave_container = leave_container  # a failed `up -d` still leaves a created container
         self.calls: list[tuple[list[str], dict[str, str]]] = []
         self.events: list[str] = []
         self.containers: dict[str, ContainerInfo] = {}
         self.saved: dict[Path, str] = {}
         self.gpu_reads = 0
-        self.inspects = 0
         self.urls = {"vllm": QWEN_URL, "vllm-encoder": ENCODER_URL}
 
     def run(self, cmd: Sequence[str], env: Mapping[str, str]) -> int:
@@ -87,9 +87,11 @@ class FakeStack:
         service = cmd[-1]
         self.events.append(f"{verb}:{service}")
         if verb == "up":
-            if service in self.fail_services:
-                return 1
             command = ("vllm", "serve", f"--dtype={DTYPES[service]}")
+            if service in self.fail_services:
+                if self.leave_container:
+                    self.containers[CONTAINERS[service]] = ContainerInfo("created", None, command)
+                return 1
             if service in self.exit_services:
                 self.containers[CONTAINERS[service]] = ContainerInfo("exited", 1, command)
                 return 0
@@ -109,7 +111,6 @@ class FakeStack:
         return read
 
     def inspect(self, container: str) -> ContainerInfo | None:
-        self.inspects += 1
         if container in self.containers:
             return self.containers[container]
         # a server that was already healthy before this run has a container too
@@ -376,10 +377,108 @@ def test_failure_leaves_the_other_server_running(tmp_path: Path) -> None:
     assert stack.healthy == {QWEN_URL}
 
 
-def test_failed_removal_still_raises(tmp_path: Path) -> None:
+def test_failed_removal_is_reported(tmp_path: Path) -> None:
     stack = FakeStack(fail_services={"vllm"}, fail_rm=True)
-    with pytest.raises(ServingError):
+    with pytest.raises(ServingError, match="could not remove vllm, check `docker ps`") as exc:
         _up(_settings(tmp_path), stack)
+    assert "removed the service" not in str(exc.value)
+
+
+def test_failed_start_that_left_a_container_keeps_its_logs(tmp_path: Path) -> None:
+    stack = FakeStack(fail_services={"vllm"}, leave_container=True)
+    with pytest.raises(ServingError, match="docker compose up failed for vllm; logs: .*qwen-.*removed the service"):
+        _up(_settings(tmp_path), stack)
+    assert stack.events == ["up:vllm", "logs:guardbench-vllm", "rm:vllm"]
+
+
+# --- the wait loop (fake clock: no real sleeping, every poll is visible) ---
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
+    fake = Clock()
+    monkeypatch.setattr(serving.time, "monotonic", lambda: fake.now)
+    monkeypatch.setattr(serving.time, "sleep", lambda seconds: setattr(fake, "now", fake.now + seconds))
+    return fake
+
+
+def _scripted(states: list[ContainerInfo | None], healthy_at: int | None = None):
+    """A server that answers /health with 503 until its ``healthy_at``-th check, and a container whose
+    state follows ``states`` poll by poll (the last state repeats). Returns (client_for, inspect, polls)."""
+    polls = {"health": 0, "inspect": 0}
+
+    def client_for(url: str) -> VllmClient:
+        def handler(request: httpx.Request) -> httpx.Response:
+            polls["health"] += 1
+            return httpx.Response(200 if healthy_at is not None and polls["health"] >= healthy_at else 503)
+        return VllmClient(url, transport=httpx.MockTransport(handler))
+
+    def inspect(name: str) -> ContainerInfo | None:
+        state = states[min(polls["inspect"], len(states) - 1)]
+        polls["inspect"] += 1
+        return state
+    return client_for, inspect, polls
+
+
+RUNNING = ContainerInfo("running", None, ())
+
+
+def _qwen(tmp_path: Path) -> serving.Server:
+    return configured_servers(_settings(tmp_path))[0]
+
+
+def test_wait_polls_until_the_server_is_healthy(tmp_path: Path, clock: Clock) -> None:
+    client_for, inspect, polls = _scripted([RUNNING], healthy_at=4)
+    assert serving._wait_until_up(_qwen(tmp_path), client_for, inspect, 600, 5) == ("healthy", None)
+    assert polls["health"] == 4 and clock.now == 15
+
+
+def test_wait_stops_when_the_container_exits_midway(tmp_path: Path, clock: Clock) -> None:
+    exited = ContainerInfo("exited", 137, ())
+    client_for, inspect, polls = _scripted([RUNNING, RUNNING, RUNNING, exited])
+    assert serving._wait_until_up(_qwen(tmp_path), client_for, inspect, 600, 5) == ("exited", exited)
+    assert clock.now == 15  # not 600
+
+
+def test_wait_treats_a_dead_container_like_an_exited_one(tmp_path: Path, clock: Clock) -> None:
+    dead = ContainerInfo("dead", None, ())
+    client_for, inspect, _ = _scripted([dead])
+    assert serving._wait_until_up(_qwen(tmp_path), client_for, inspect, 600, 5) == ("exited", dead)
+    assert clock.now == 0
+
+
+def test_wait_keeps_waiting_while_docker_cannot_inspect(tmp_path: Path, clock: Clock) -> None:
+    client_for, inspect, _ = _scripted([None])
+    assert serving._wait_until_up(_qwen(tmp_path), client_for, inspect, 20, 5) == ("timeout", None)
+    assert clock.now == 20
+
+
+@pytest.mark.parametrize("timeout,interval", [(7, 5), (1, 5), (12, 5)])
+def test_wait_never_sleeps_past_the_timeout(tmp_path: Path, clock: Clock, timeout: float, interval: float) -> None:
+    client_for, inspect, _ = _scripted([RUNNING])
+    assert serving._wait_until_up(_qwen(tmp_path), client_for, inspect, timeout, interval)[0] == "timeout"
+    assert clock.now == timeout
+
+
+def test_up_fails_when_the_container_exits_while_waiting(tmp_path: Path, clock: Clock) -> None:
+    stack = FakeStack(never_healthy={"vllm"})
+    client_for, inspect, _ = _scripted([RUNNING, RUNNING, ContainerInfo("exited", 1, ())])
+    with pytest.raises(ServingError, match="exited with code 1 before it was healthy; logs: "):
+        up(_settings(tmp_path), run=stack.run, gpu_memory=stack.gpu(16000, 16000), client_for=client_for,
+           inspect=inspect, save_logs=stack.save_logs, base_env={}, timeout=600, interval=5)
+    assert clock.now == 10  # two sleeps, then the exit is seen; the 600 s timeout is never reached
+    assert stack.events == ["up:vllm", "logs:guardbench-vllm", "rm:vllm"]
+
+
+def test_unknown_exit_code_is_shown_as_a_question_mark(tmp_path: Path, clock: Clock,
+                                                       capsys: pytest.CaptureFixture[str]) -> None:
+    client_for, inspect, _ = _scripted([ContainerInfo("exited", None, ())])
+    assert not wait_server(_settings(tmp_path), "qwen", 600, client_for=client_for, inspect=inspect)
+    assert capsys.readouterr().out == "qwen: exited (exit code ?)\n"
 
 
 # --- down, status, wait ---
@@ -423,6 +522,18 @@ def test_status_of_unconfigured_encoder(tmp_path: Path) -> None:
     stack = FakeStack(healthy={QWEN_URL})
     assert status_all(_settings(tmp_path), "encoder", client_for=stack.client_for, inspect=stack.inspect) \
         == {"encoder": "not configured"}
+
+
+def test_status_reports_dtype_only_for_a_running_container(tmp_path: Path) -> None:
+    stack = FakeStack(healthy={QWEN_URL})
+    left_over = ContainerInfo("exited", 1, ("vllm", "serve", "--dtype=float16"))
+    report = status_all(_settings(tmp_path), "qwen", client_for=stack.client_for, inspect=lambda name: left_over)
+    assert report["qwen"]["reachable"] is True and "dtype" not in report["qwen"]
+
+
+def test_status_rejects_an_unknown_server_name(tmp_path: Path) -> None:
+    with pytest.raises(ServingError, match="unknown server"):
+        status_all(_settings(tmp_path), "typo", client_for=FakeStack().client_for, inspect=FakeStack().inspect)
 
 
 def test_status_omits_dtype_when_the_container_is_unknown(tmp_path: Path) -> None:
@@ -485,6 +596,36 @@ def test_cli_passes_the_chosen_server(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("sys.argv", ["guardbench-vllm", *argv])
         serving.main()
     assert started == [("qwen", 600.0), ("encoder", 600.0), ("qwen", 30.0)]
+
+
+def test_cli_status_and_down(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    asked: list[str | None] = []
+
+    def fake_status(settings: Settings, name: str | None = None) -> dict[str, str]:
+        asked.append(name)
+        return {name or "all": "ok"}
+    monkeypatch.setattr(serving, "status_all", fake_status)
+    for argv in (["status"], ["status", "encoder"], ["status", "qwen"]):
+        monkeypatch.setattr("sys.argv", ["guardbench-vllm", *argv])
+        serving.main()
+    assert asked == [None, "encoder", "qwen"]
+    assert capsys.readouterr().out.splitlines() == ["all: ok", "encoder: ok", "qwen: ok"]
+
+    stopped: list[Settings] = []
+    monkeypatch.setattr(serving, "down", stopped.append)
+    monkeypatch.setattr("sys.argv", ["guardbench-vllm", "down"])
+    serving.main()
+    assert len(stopped) == 1 and capsys.readouterr().out == "down\n"
+
+
+def test_cli_up_prints_the_status_of_that_server(monkeypatch: pytest.MonkeyPatch,
+                                                 capsys: pytest.CaptureFixture[str]) -> None:
+    asked: list[str | None] = []
+    monkeypatch.setattr(serving, "up", lambda settings, name, timeout: None)
+    monkeypatch.setattr(serving, "status_all", lambda settings, name=None: asked.append(name) or {name: "ok"})
+    monkeypatch.setattr("sys.argv", ["guardbench-vllm", "up", "encoder"])
+    serving.main()
+    assert asked == ["encoder"] and capsys.readouterr().out == "encoder: ok\n"
 
 
 def test_cli_rejects_an_unknown_server(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -573,6 +714,16 @@ def test_save_container_logs_writes_stdout_and_stderr(monkeypatch: pytest.Monkey
     path = tmp_path / "runs" / "vllm-logs" / "qwen-1.log"
     assert serving.save_container_logs("guardbench-vllm", path)
     assert path.read_text() == "engine failed\n"
+
+
+def test_save_container_logs_removes_the_file_when_docker_cannot_run(monkeypatch: pytest.MonkeyPatch,
+                                                                     tmp_path: Path) -> None:
+    def missing(cmd: list[str], **kw: object) -> None:
+        raise FileNotFoundError("docker")
+    monkeypatch.setattr(serving.subprocess, "run", missing)
+    path = tmp_path / "vllm-logs" / "qwen-1.log"
+    assert not serving.save_container_logs("guardbench-vllm", path)
+    assert not path.exists()
 
 
 def test_save_container_logs_removes_the_file_when_docker_fails(monkeypatch: pytest.MonkeyPatch,

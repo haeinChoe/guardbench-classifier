@@ -187,6 +187,7 @@ def save_container_logs(name: str, path: Path) -> bool:
             returncode = subprocess.run(["docker", "logs", name], stdout=out, stderr=subprocess.STDOUT,
                                         check=False).returncode
     except OSError:
+        path.unlink(missing_ok=True)
         return False
     if returncode != 0:
         path.unlink(missing_ok=True)
@@ -241,9 +242,11 @@ def check_gpu_memory(servers: Sequence[Server], margin_mib: int, total_mib: int,
                            f"free {free_mib} MiB")
 
 
-def status_all(settings: Settings, name: str | None = None, client_for: ClientFactory = VllmClient,
+def status_all(settings: Settings, name: str | None = None, *, client_for: ClientFactory = VllmClient,
                inspect: Inspect = inspect_container) -> dict[str, Any]:
     """Status of server ``name``, or of every configured server (plus "encoder: not configured") when None."""
+    if name is not None and name not in SERVER_NAMES:
+        raise ServingError(f"unknown server {name!r}; choose one of {', '.join(SERVER_NAMES)}")
     report: dict[str, Any] = {}
     for server in configured_servers(settings):
         if name not in (None, server.name):
@@ -254,7 +257,7 @@ def status_all(settings: Settings, name: str | None = None, client_for: ClientFa
         finally:
             client.close()
         info = inspect(server.container) if report[server.name]["reachable"] else None
-        dtype = dtype_of(info.command) if info else None
+        dtype = dtype_of(info.command) if info is not None and info.status == "running" else None
         if dtype:
             report[server.name]["dtype"] = dtype
     if name in (None, "encoder"):
@@ -264,6 +267,10 @@ def status_all(settings: Settings, name: str | None = None, client_for: ClientFa
 
 def format_status(report: Mapping[str, Any]) -> str:
     return "\n".join(f"{name}: {value if isinstance(value, str) else json.dumps(value)}" for name, value in report.items())
+
+
+def _exit_code(info: ContainerInfo | None) -> str:
+    return "?" if info is None or info.exit_code is None else str(info.exit_code)
 
 
 def _healthy(server: Server, client_for: ClientFactory) -> bool:
@@ -291,9 +298,10 @@ def _wait_until_up(server: Server, client_for: ClientFactory, inspect: Inspect, 
             info = inspect(server.container)
             if info is not None and info.status in ("exited", "dead"):
                 return "exited", info
-            if time.monotonic() >= deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 return "timeout", info
-            time.sleep(interval)
+            time.sleep(min(interval, remaining))
     finally:
         client.close()
 
@@ -332,22 +340,22 @@ def up(settings: Settings, name: str = DEFAULT_SERVER, *, run: Runner = run_comm
     else:
         outcome, info = _wait_until_up(server, client_for, inspect, timeout, interval)
         if outcome == "exited":
-            failure = f"{server.name} container exited with code {info.exit_code if info else '?'} before it was healthy"
+            failure = f"{server.name} container exited with code {_exit_code(info)} before it was healthy"
         elif outcome == "timeout":
             failure = f"{server.name} not healthy within {timeout:g}s"
     if not failure:
         print(f"{server.name}: healthy")
         return
     log = _save_logs(settings, server, inspect, save_logs)  # before the container is removed
-    _remove(settings, server, run, env)
+    removed = _remove(settings, server, run, env)
     where = f"logs: {log}" if log else "no container logs were available"
-    raise ServingError(f"{failure}; {where}; removed the service started by this run")
+    cleanup = "removed the service started by this run" if removed else f"could not remove {server.service}, check `docker ps`"
+    raise ServingError(f"{failure}; {where}; {cleanup}")
 
 
-def _remove(settings: Settings, server: Server, run: Runner, env: Mapping[str, str]) -> None:
+def _remove(settings: Settings, server: Server, run: Runner, env: Mapping[str, str]) -> bool:
     # A failed `up -d` can still leave a created container, so remove it in every failure case.
-    if run(compose_command(settings, "rm", "--stop", "--force", server.service), env) != 0:
-        print(f"warning: could not remove {server.service}; check `docker ps`", file=sys.stderr)
+    return run(compose_command(settings, "rm", "--stop", "--force", server.service), env) == 0
 
 
 def down(settings: Settings, *, run: Runner = run_command, base_env: Mapping[str, str] | None = None) -> None:
@@ -360,7 +368,7 @@ def wait_server(settings: Settings, name: str, timeout: float, *, client_for: Cl
                 inspect: Inspect = inspect_container, interval: float = 5.0) -> bool:
     server = select_server(settings, name)
     outcome, info = _wait_until_up(server, client_for, inspect, timeout, interval)
-    detail = f" (exit code {info.exit_code if info else '?'})" if outcome == "exited" else ""
+    detail = f" (exit code {_exit_code(info)})" if outcome == "exited" else ""
     print(f"{server.name}: {'healthy' if outcome == 'healthy' else outcome}{detail}")
     return outcome == "healthy"
 
