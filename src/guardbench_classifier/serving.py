@@ -123,6 +123,7 @@ def compose_env(settings: Settings, base: Mapping[str, str]) -> dict[str, str]:
             VLLM_ENCODER_CHECKPOINT_DIR=str(settings.vllm_encoder_checkpoint_dir),
             VLLM_ENCODER_PORT=str(settings.vllm_encoder_port),
             VLLM_ENCODER_GPU_MEMORY_UTILIZATION=str(settings.vllm_encoder_gpu_memory_utilization),
+            VLLM_ENCODER_DTYPE=settings.vllm_encoder_dtype,
         )
     return env
 

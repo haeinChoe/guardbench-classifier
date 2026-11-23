@@ -202,6 +202,17 @@ def test_every_serving_compose_variable_is_passed_by_python(tmp_path: Path) -> N
     assert used - NON_SERVING_COMPOSE_VARS == passed
 
 
+def test_encoder_dtype_is_pinned_in_compose_and_passed_by_python(tmp_path: Path) -> None:
+    import re
+    compose = (Path(__file__).resolve().parents[1] / "compose.yaml").read_text()
+    encoder = compose[compose.index("  vllm-encoder:"):]
+    match = re.search(r'"--dtype=\$\{VLLM_ENCODER_DTYPE:-([a-z0-9]+)\}"', encoder)
+    assert match, "encoder service must pin --dtype"
+    assert match.group(1) == Settings.from_env({}, root=tmp_path).vllm_encoder_dtype == "float32"
+    env = compose_env(_encoder_settings(tmp_path, VLLM_ENCODER_DTYPE="bfloat16"), {})
+    assert env["VLLM_ENCODER_DTYPE"] == "bfloat16"
+
+
 # --- encoder selection ---
 
 def test_encoder_unconfigured_starts_qwen_only(tmp_path: Path) -> None:

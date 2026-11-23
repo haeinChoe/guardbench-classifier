@@ -50,6 +50,8 @@ services:
     entrypoint: ["vllm", "serve"]
     command:
       - "/models/encoder"
+      # Pinned: vLLM would otherwise pick fp16, and predictions differ between precisions.
+      - "--dtype=${VLLM_ENCODER_DTYPE:-float32}"
       - "--gpu-memory-utilization=${VLLM_ENCODER_GPU_MEMORY_UTILIZATION:-0.10}"
       - "--seed=0"
     ports:
